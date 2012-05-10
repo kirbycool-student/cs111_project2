@@ -52,6 +52,7 @@ typedef struct osprd_info {
 
 	osp_spinlock_t mutex;           // Mutex for synchronizing access to
 					// this block device
+    int readlock_num;
 
 	unsigned ticket_head;		// Currently running ticket for
 					// the device lock
@@ -120,9 +121,10 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
 
 	// Consider the 'req->sector', 'req->current_nr_sectors', and
 	// 'req->buffer' members, and the rq_data_dir() function.
-
-    long offset = req->sector * SECTOR_SIZE;
-    long numbytes = req->current_nr_sectors * SECTOR_SIZE;
+    long offset;
+    long numbytes;
+    offset = req->sector * SECTOR_SIZE;
+    numbytes = req->current_nr_sectors * SECTOR_SIZE;
 	
 	eprintk("Should process request...\n");
 
@@ -234,8 +236,17 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// be protected by a spinlock; which ones?)
 
 		// Your code here (instead of the next two lines).
-		eprintk("Attempting to acquire\n");
-		r = -ENOTTY;
+		//eprintk("Attempting to acquire\n");
+		//r = -ENOTTY;
+        if ( filp_writable )
+        {
+            //attempt to get a write lock
+        }
+        else
+        {
+            //attempt to get a read lock
+        }
+
 
 	} else if (cmd == OSPRDIOCTRYACQUIRE) {
 
