@@ -52,7 +52,9 @@ typedef struct osprd_info {
 
 	osp_spinlock_t mutex;           // Mutex for synchronizing access to
 					// this block device
-    int readlock_num;
+	osp_spinlock_t head_lock;	// lock for ticket_head;
+
+    	int readlock_num;
 
 	unsigned ticket_head;		// Currently running ticket for
 					// the device lock
@@ -232,12 +234,20 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// is the ticket currently being served.  You should set a local
 		// variable to 'd->ticket_head' and increment 'd->ticket_head'.
 		// Then, block at least until 'd->ticket_tail == local_ticket'.
+		//TODO:
 		// (Some of these operations are in a critical section and must
 		// be protected by a spinlock; which ones?)
 
 		// Your code here (instead of the next two lines).
 		eprintk("Attempting to acquire\n");
 		r = -ENOTTY;
+	unsigned local_ticket;
+	
+	if(d->mutex.lock == 0 )
+	{
+		osp_spin_lock_init(&d->head_lock);
+	}	
+
         if ( filp_writable )
         {
             //attempt to get a write lock
@@ -250,8 +260,15 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             }
             else
             {
-                wait_event_interruptible( d->blockq, d->mutex.lock == 0 );
-                osp_spin_lock(&d->mutex);
+		osp_spin_lock(&d->head_lock);
+			local_ticket = d->ticket_head;
+			d->ticket_head++;
+		osp_spin_unlock(&d->head_lock);
+                
+		wait_event_interruptible( d->blockq, (d->mutex.lock == 0 &&
+						d->ticket_tail == local_ticket));
+                d->ticket_tail++;
+		osp_spin_lock(&d->mutex);
                 filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 0;
                 r = 0;
@@ -277,7 +294,15 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             else
             {
                 //file is write locked
-                wait_event_interruptible( d->blockq, ( d->mutex.lock == 0 || d->readlock_num != 0) );
+		osp_spin_lock(&d->head_lock);
+			local_ticket = d->ticket_head;
+			d->ticket_head++;
+		osp_spin_unlock(&d->head_lock);
+                
+		wait_event_interruptible( d->blockq, 
+			( d->mutex.lock == 0 || d->readlock_num != 0) &&
+					d->ticket_head == local_ticket);
+                d->ticket_tail++;
                 if ( d->mutex.lock == 0)
                 {
                     osp_spin_lock(&d->mutex);
