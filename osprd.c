@@ -34,7 +34,7 @@
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("CS 111 RAM Disk");
 // EXERCISE: Pass your names into the kernel as the module's authors.
-MODULE_AUTHOR("Skeletor");
+MODULE_AUTHOR("Taylor Lee and Kirby Cool");
 
 #define OSPRD_MAJOR	222
 
@@ -62,7 +62,7 @@ typedef struct osprd_info {
 	wait_queue_head_t blockq;       // Wait queue for tasks blocked on
 					// the device lock
 
-	/* HINT: You may want to add additional fields to help
+	/* TODO HINT: You may want to add additional fields to help
 	         in detecting deadlock. */
 
 	// The following elements are used internally; you don't need
@@ -111,17 +111,26 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
 		end_request(req, 0);
 		return;
 	}
-
 	// EXERCISE: Perform the read or write request by copying data between
 	// our data array and the request's buffer.
+	
 	// Hint: The 'struct request' argument tells you what kind of request
 	// this is, and which sectors are being read or written.
 	// Read about 'struct request' in <linux/blkdev.h>.
+
 	// Consider the 'req->sector', 'req->current_nr_sectors', and
 	// 'req->buffer' members, and the rq_data_dir() function.
-
-	// Your code here.
+	
 	eprintk("Should process request...\n");
+
+	if ( rq_data_dir(req) == READ)
+	{
+	
+	}	
+	else if ( rq_data_dir(req) == WRITE )
+	{
+		memcpy(req->buffer,d->data[req->sector],SECTOR_SIZE);
+	}
 
 	end_request(req, 1);
 }
