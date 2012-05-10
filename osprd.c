@@ -261,8 +261,8 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             else
             {
 		        osp_spin_lock(&d->head_lock);
-			    local_ticket = d->ticket_head;
-			    d->ticket_head++;
+			        local_ticket = d->ticket_head;
+			        d->ticket_head++;
 		        osp_spin_unlock(&d->head_lock);
                 
 		        wait_event_interruptible( d->blockq, (d->mutex.lock == 0 &&
@@ -294,10 +294,10 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             else
             {
                 //file is write locked
-		osp_spin_lock(&d->head_lock);
-			local_ticket = d->ticket_head;
-			d->ticket_head++;
-		osp_spin_unlock(&d->head_lock);
+		    osp_spin_lock(&d->head_lock);
+			    local_ticket = d->ticket_head;
+			    d->ticket_head++;
+		    osp_spin_unlock(&d->head_lock);
                 
 		wait_event_interruptible( d->blockq, 
 			( d->mutex.lock == 0 || d->readlock_num != 0) &&
