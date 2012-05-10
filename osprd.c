@@ -234,7 +234,6 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// is the ticket currently being served.  You should set a local
 		// variable to 'd->ticket_head' and increment 'd->ticket_head'.
 		// Then, block at least until 'd->ticket_tail == local_ticket'.
-		//TODO:
 		// (Some of these operations are in a critical section and must
 		// be protected by a spinlock; which ones?)
 
@@ -243,10 +242,6 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		r = -ENOTTY;
 	unsigned local_ticket;
 	
-	if(d->mutex.lock == 0 )
-	{
-		osp_spin_lock_init(&d->head_lock);
-	}	
 
         if ( filp_writable )
         {
@@ -398,12 +393,18 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                 osp_spin_unlock( &d->mutex );
             }
             d->readlock_num--;
+            filp->f_flags ^= F_OSPR_LOCKED;
+            wake_up_all(d->blockq);
+            d->ticket_tail++;
             r = 0;
         }
         else
         {
             //unlock a write lock
             osp_spin_unlock( &d->mutex );
+            filp->f_flags ^= F_OSPR_LOCKED;
+            wake_up_all(d->blockq);
+            d->ticket_tail++;
             r = 0;
         }
 
@@ -421,6 +422,7 @@ static void osprd_setup(osprd_info_t *d)
 	init_waitqueue_head(&d->blockq);
 	osp_spin_lock_init(&d->mutex);
 	d->ticket_head = d->ticket_tail = 0;
+	osp_spin_lock_init(&d->head_lock);
 	/* Add code here if you add fields to osprd_info_t. */
 }
 
