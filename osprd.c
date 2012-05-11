@@ -374,7 +374,11 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 
 		// Your code here (instead of the next line).
 		r = -ENOTTY;
-        if ( d->readlock_num != 0 )
+        if ( !(filp->f_flag & F_OSPRD_LOCKED) )
+        {
+            r = -EINVAL;
+        }
+        else if ( d->readlock_num != 0 )
         {
             //unlock a read lock
             if ( d->readlock_num == 1 )
