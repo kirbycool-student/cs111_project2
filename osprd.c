@@ -237,14 +237,46 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 
 		// Your code here (instead of the next two lines).
 		//eprintk("Attempting to acquire\n");
-		//r = -ENOTTY;
+		r = -ENOTTY;
         if ( filp_writable )
         {
             //attempt to get a write lock
+            if ( d->mutex.lock == 0 )
+            {
+                osp_spin_lock(&d->mutex);
+                d->readlock_num = 0;
+                r = 0;
+            }
+            else
+            {
+                wait_event_interruptible( d->blockq, d->mutex.lock == 0 );
+                osp_spin_lock(&d->mutex);
+                d->readlock_num = 0;
+                r = 0;
+            }
         }
         else
         {
             //attempt to get a read lock
+            if ( d->mutex.lock == 0  )
+            {
+                osp_spin_lock(&d->mutex);
+                d->readlock_num = 1;
+                r = 0;
+            }
+            else if ( d->readlock_num != 0 )
+            {
+                osp_spin_lock(&d->mutex);
+                d->readlock_num++;
+                r = 0;
+            }
+            else
+            {
+                wait_event_interruptible( d->blockq, ( d->mutex.lock == 0 || d->readlock_num == 0) );
+                osp_spin_lock(&d->mutex);
+                d->readlock_num++;
+                r = 0;
+            }
         }
 
 
