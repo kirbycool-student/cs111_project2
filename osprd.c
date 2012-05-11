@@ -73,8 +73,7 @@ typedef struct osprd_info {
 	wait_queue_head_t blockq;       // Wait queue for tasks blocked on
 					// the device lock
 
-	/* TODO HINT: You may want to add additional fields to help
-	         in detecting deadlock. */
+    int deadlocked;
 
 	// The following elements are used internally; you don't need
 	// to understand them.
@@ -105,6 +104,15 @@ static osprd_info_t *file2osprd(struct file *filp);
  *   the open file, and 'user_data' is copied from for_each_open_file's third
  *   argument.
  */
+void detect_deadlock(struct file *filp, osprd_info_t *d) 
+{       // This hook function will be passed to for_each_file.
+    if (file2osprd(filp) == d)
+    {
+        d->deadlocked = 1;
+    }
+}
+
+
 static void for_each_open_file(struct task_struct *task,
 			       void (*callback)(struct file *filp,
 						osprd_info_t *user_data),
@@ -157,7 +165,8 @@ static int osprd_open(struct inode *inode, struct file *filp)
 {
 	// Always set the O_SYNC flag. That way, we will get writes immediately
 	// instead of waiting for them to get through write-back caches.
-	filp->f_flags |= O_SYNC;
+	for_each_open_file(current, detect_deadlock, file2osprd(filp));
+    filp->f_flags |= O_SYNC;
 	return 0;
 }
 
@@ -253,6 +262,8 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		//eprintk("Attempting to acquire\n");
 		r = -ENOTTY;
 	    unsigned local_ticket;
+        
+        
 	
 
         if ( filp_writable )
@@ -268,6 +279,12 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             }
             else
             {
+                //for_each_open_file(current, detect_deadlock, d);
+                if(d->deadlocked == 1)
+                {  
+                    d->deadlocked = 0; 
+                    return -EDEADLK;
+                }
 		        osp_spin_lock(&d->head_lock);
 			    local_ticket = d->ticket_head;
 			    d->ticket_head++;
@@ -344,6 +361,12 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             else
             {
                 //file is write locked
+                /*for_each_open_file(current, detect_deadlock, d);
+                if(d->deadlocked == 1)
+                {  
+                    d->deadlocked = 0; 
+                    return -EDEADLK;
+                }*/
 		        osp_spin_lock(&d->head_lock);
 			        local_ticket = d->ticket_head;
 			        d->ticket_head++;
@@ -560,8 +583,10 @@ static void osprd_setup(osprd_info_t *d)
 	d->ticket_head = d->ticket_tail = 0;
     d->readlock_num = 0;
     d->ticket_hole_head = NULL;
-	osp_spin_lock_init(&d->head_lock);
-	/* Add code here if you add fields to osprd_info_t. */
+	d->deadlocked = 0;
+    osp_spin_lock_init(&d->head_lock);
+    
+   	/* Add code here if you add fields to osprd_info_t. */
 }
 
 
