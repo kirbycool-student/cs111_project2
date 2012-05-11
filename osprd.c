@@ -421,6 +421,7 @@ static void osprd_setup(osprd_info_t *d)
 	init_waitqueue_head(&d->blockq);
 	osp_spin_lock_init(&d->mutex);
 	d->ticket_head = d->ticket_tail = 0;
+    d->readlock_num = 0;
 	/* Add code here if you add fields to osprd_info_t. */
 }
 
