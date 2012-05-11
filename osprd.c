@@ -160,6 +160,7 @@ static int osprd_open(struct inode *inode, struct file *filp)
 static int osprd_close_last(struct inode *inode, struct file *filp)
 {
 	if (filp) {
+        eprintk("closing file\n");
 		osprd_info_t *d = file2osprd(filp);
 		int filp_writable = filp->f_mode & FMODE_WRITE;
 
@@ -168,7 +169,8 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 		// as appropriate.
 
 		// Your code here.
-
+        osprd_ioctl( inode, filp, OSPRDIOCRELEASE, NULL );
+        eprintk("file released\n");
 		// This line avoids compiler warnings; you may remove it.
 		(void) filp_writable, (void) d;
 
@@ -253,6 +255,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                 filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 0;
                 r = 0;
+                eprintk("got write lock\n");
             }
             else
             {
@@ -260,7 +263,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			    local_ticket = d->ticket_head;
 			    d->ticket_head++;
 		        osp_spin_unlock(&d->head_lock);
-                
+                eprintk("waiting for write lock\n");
 		        wait_event_interruptible( d->blockq, (d->mutex.lock == 0 &&
 						d->ticket_tail == local_ticket));
                 //signal handling
@@ -273,6 +276,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                 filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 0;
                 r = 0;
+                eprintk("got write lock\n");
             }
         }
         else
@@ -285,6 +289,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                 filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 1;
                 r = 0;
+                eprintk("got read lock\n");
             }
             else if ( d->readlock_num != 0 )
             {
@@ -299,10 +304,10 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			        local_ticket = d->ticket_head;
 			        d->ticket_head++;
 		        osp_spin_unlock(&d->head_lock);
-                
+                eprintk("waiting for read lock\n"); 
 		        wait_event_interruptible( d->blockq, 
 			        ( d->mutex.lock == 0 || d->readlock_num != 0) &&
-					d->ticket_head == local_ticket);
+					d->ticket_tail == local_ticket );
                 //signal processing
                 if ( signal_pending(current) )
                 {
@@ -315,6 +320,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                     osp_spin_lock(&d->mutex);
                     filp->f_flags |= F_OSPRD_LOCKED;
                 }
+                eprintk("got read lock\n");
                 d->readlock_num++;
                 r = 0;
             }
@@ -381,7 +387,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 
 		// Your code here (instead of the next line).
 		r = -ENOTTY;
-        if ( !(filp->f_flag & F_OSPRD_LOCKED) )
+        if ( !(filp->f_flags & F_OSPRD_LOCKED) )
         {
             r = -EINVAL;
         }
@@ -392,20 +398,21 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             {
                 //this is the last read lock
                 osp_spin_unlock( &d->mutex );
+                eprintk("unlocked read lock\n");
             }
             d->readlock_num--;
-            filp->f_flags ^= F_OSPR_LOCKED;
-            wake_up_all(d->blockq);
-            d->ticket_tail++;
+            filp->f_flags ^= F_OSPRD_LOCKED;
+            wake_up_all(&d->blockq);
             r = 0;
+            eprintk("decremented read locks\n");
         }
         else
         {
             //unlock a write lock
             osp_spin_unlock( &d->mutex );
-            filp->f_flags ^= F_OSPR_LOCKED;
-            wake_up_all(d->blockq);
-            d->ticket_tail++;
+            filp->f_flags ^= F_OSPRD_LOCKED;
+            eprintk("unlocked write lock and mutex.lock=%d and d->readlock_num=%d and d->ticket_tail=%d\n", d->mutex.lock, d->readlock_num, d->ticket_tail);
+            wake_up_all(&d->blockq);
             r = 0;
         }
 
