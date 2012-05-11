@@ -24,7 +24,7 @@
  * is locked. */
 #define F_OSPRD_LOCKED	0x80000
 
-/* eprintk() prints messages to the console.
+/* //eprintk() prints messages to the console.
  * (If working on a real Linux machine, change KERN_NOTICE to KERN_ALERT or
  * KERN_EMERG so that you are sure to see the messages.  By default, the
  * kernel does not print all messages to the console.  Levels like KERN_ALERT
@@ -128,7 +128,7 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     offset = req->sector * SECTOR_SIZE;
     numbytes = req->current_nr_sectors * SECTOR_SIZE;
 	
-	eprintk("Should process request...\n");
+	////eprintk("Should process request...\n");
 
 	if ( rq_data_dir(req) == READ)
 	{
@@ -153,14 +153,15 @@ static int osprd_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-
+int osprd_ioctl(struct inode *inode, struct file *filp,
+		unsigned int cmd, unsigned long arg);
 // This function is called when a /dev/osprdX file is finally closed.
 // (If the file descriptor was dup2ed, this function is called only when the
 // last copy is closed.)
 static int osprd_close_last(struct inode *inode, struct file *filp)
 {
 	if (filp) {
-        eprintk("closing file\n");
+        //eprintk("closing file\n");
 		osprd_info_t *d = file2osprd(filp);
 		int filp_writable = filp->f_mode & FMODE_WRITE;
 
@@ -170,7 +171,7 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 
 		// Your code here.
         osprd_ioctl( inode, filp, OSPRDIOCRELEASE, NULL );
-        eprintk("file released\n");
+        //eprintk("file released\n");
 		// This line avoids compiler warnings; you may remove it.
 		(void) filp_writable, (void) d;
 
@@ -241,7 +242,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// be protected by a spinlock; which ones?)
 
 		// Your code here (instead of the next two lines).
-		eprintk("Attempting to acquire\n");
+		//eprintk("Attempting to acquire\n");
 		r = -ENOTTY;
 	unsigned local_ticket;
 	
@@ -255,7 +256,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                 filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 0;
                 r = 0;
-                eprintk("got write lock\n");
+                //eprintk("got write lock\n");
             }
             else
             {
@@ -263,20 +264,21 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			    local_ticket = d->ticket_head;
 			    d->ticket_head++;
 		        osp_spin_unlock(&d->head_lock);
-                eprintk("waiting for write lock\n");
+                //eprintk("waiting for write lock\n");
 		        wait_event_interruptible( d->blockq, (d->mutex.lock == 0 &&
 						d->ticket_tail == local_ticket));
+                d->ticket_tail++;
                 //signal handling
                 if ( signal_pending(current) )
                 {
+                    //eprintk("Received signal\n");
                     return -ERESTARTSYS;
                 }
-                d->ticket_tail++;
 		        osp_spin_lock(&d->mutex);
                 filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 0;
                 r = 0;
-                eprintk("got write lock\n");
+                //eprintk("got write lock\n");
             }
         }
         else
@@ -289,7 +291,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                 filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 1;
                 r = 0;
-                eprintk("got read lock\n");
+                //eprintk("got read lock\n");
             }
             else if ( d->readlock_num != 0 )
             {
@@ -304,23 +306,23 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			        local_ticket = d->ticket_head;
 			        d->ticket_head++;
 		        osp_spin_unlock(&d->head_lock);
-                eprintk("waiting for read lock\n"); 
+                //eprintk("waiting for read lock\n"); 
 		        wait_event_interruptible( d->blockq, 
 			        ( d->mutex.lock == 0 || d->readlock_num != 0) &&
 					d->ticket_tail == local_ticket );
+                d->ticket_tail++;
                 //signal processing
                 if ( signal_pending(current) )
                 {
+                    //eprintk("received signal\n");
                     return -ERESTARTSYS;
                 }
-
-                d->ticket_tail++;
                 if ( d->mutex.lock == 0)
                 {
                     osp_spin_lock(&d->mutex);
                     filp->f_flags |= F_OSPRD_LOCKED;
                 }
-                eprintk("got read lock\n");
+                //eprintk("got read lock\n");
                 d->readlock_num++;
                 r = 0;
             }
@@ -337,7 +339,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// Otherwise, if we can grant the lock request, return 0.
 
 		// Your code here (instead of the next two lines).
-		eprintk("Attempting to try acquire\n");
+		//eprintk("Attempting to try acquire\n");
 		r = -ENOTTY;
         if ( filp_writable )
         {
@@ -398,20 +400,20 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             {
                 //this is the last read lock
                 osp_spin_unlock( &d->mutex );
-                eprintk("unlocked read lock\n");
+                //eprintk("unlocked read lock\n");
             }
             d->readlock_num--;
             filp->f_flags ^= F_OSPRD_LOCKED;
             wake_up_all(&d->blockq);
             r = 0;
-            eprintk("decremented read locks\n");
+            //eprintk("decremented read locks\n");
         }
         else
         {
             //unlock a write lock
             osp_spin_unlock( &d->mutex );
             filp->f_flags ^= F_OSPRD_LOCKED;
-            eprintk("unlocked write lock and mutex.lock=%d and d->readlock_num=%d and d->ticket_tail=%d\n", d->mutex.lock, d->readlock_num, d->ticket_tail);
+            //eprintk("unlocked write lock and mutex.lock=%d and d->readlock_num=%d and d->ticket_tail=%d\n", d->mutex.lock, d->readlock_num, d->ticket_tail);
             wake_up_all(&d->blockq);
             r = 0;
         }
