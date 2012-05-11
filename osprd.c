@@ -236,7 +236,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// be protected by a spinlock; which ones?)
 
 		// Your code here (instead of the next two lines).
-		//eprintk("Attempting to acquire\n");
+		eprintk("Attempting to acquire\n");
 		r = -ENOTTY;
         if ( filp_writable )
         {
@@ -244,6 +244,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             if ( d->mutex.lock == 0 )
             {
                 osp_spin_lock(&d->mutex);
+                filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 0;
                 r = 0;
             }
@@ -251,6 +252,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             {
                 wait_event_interruptible( d->blockq, d->mutex.lock == 0 );
                 osp_spin_lock(&d->mutex);
+                filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 0;
                 r = 0;
             }
@@ -260,20 +262,27 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             //attempt to get a read lock
             if ( d->mutex.lock == 0  )
             {
+                //lock is free
                 osp_spin_lock(&d->mutex);
+                filp->f_flags |= F_OSPRD_LOCKED;
                 d->readlock_num = 1;
                 r = 0;
             }
             else if ( d->readlock_num != 0 )
             {
-                osp_spin_lock(&d->mutex);
+                //file is read locked
                 d->readlock_num++;
                 r = 0;
             }
             else
             {
-                wait_event_interruptible( d->blockq, ( d->mutex.lock == 0 || d->readlock_num == 0) );
-                osp_spin_lock(&d->mutex);
+                //file is write locked
+                wait_event_interruptible( d->blockq, ( d->mutex.lock == 0 || d->readlock_num != 0) );
+                if ( d->mutex.lock == 0)
+                {
+                    osp_spin_lock(&d->mutex);
+                    filp->f_flags |= F_OSPRD_LOCKED;
+                }
                 d->readlock_num++;
                 r = 0;
             }
@@ -292,7 +301,43 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// Your code here (instead of the next two lines).
 		eprintk("Attempting to try acquire\n");
 		r = -ENOTTY;
-
+        if ( filp_writable )
+        {
+            //attempt to get a write lock
+            if ( d->mutex.lock == 0 )
+            {
+                osp_spin_lock(&d->mutex);
+                filp->f_flags |= F_OSPRD_LOCKED;
+                d->readlock_num = 0;
+                r = 0;
+            }
+            else
+            {
+                r = -EBUSY;
+            }
+        }
+        else
+        {
+            //attempt to get a read lock
+            if ( d->mutex.lock == 0  )
+            {
+                //file unlocked 
+                osp_spin_lock(&d->mutex);
+                filp->f_flags |= F_OSPRD_LOCKED;
+                d->readlock_num = 1;
+                r = 0;
+            }
+            else if ( d->readlock_num != 0 )
+            {
+                //file is read locked
+                d->readlock_num++;
+                r = 0;
+            }
+            else
+            {
+                r = -EBUSY;
+            }
+        }
 	} else if (cmd == OSPRDIOCRELEASE) {
 
 		// EXERCISE: Unlock the ramdisk.
@@ -304,6 +349,23 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 
 		// Your code here (instead of the next line).
 		r = -ENOTTY;
+        if ( d->readlock_num != 0 )
+        {
+            //unlock a read lock
+            if ( d->readlock_num == 1 )
+            {
+                //this is the last read lock
+                osp_spin_unlock( &d->mutex );
+            }
+            d->readlock_num--;
+            r = 0;
+        }
+        else
+        {
+            //unlock a write lock
+            osp_spin_unlock( &d->mutex );
+            r = 0;
+        }
 
 	} else
 		r = -ENOTTY; /* unknown command */
