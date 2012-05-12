@@ -14,6 +14,7 @@
 #include <linux/wait.h>
 #include <linux/file.h>
 
+
 #include "spinlock.h"
 #include "osprd.h"
 
@@ -44,6 +45,11 @@ MODULE_AUTHOR("Taylor Lee and Kirby Cool");
 static int nsectors = 32;
 module_param(nsectors, int, 0);
 
+typedef struct list_node {
+    struct list_node* prev;
+    struct list_node* next;
+    unsigned int ticket;
+} list_node_t;
 
 /* The internal representation of our device. */
 typedef struct osprd_info {
@@ -54,7 +60,9 @@ typedef struct osprd_info {
 					// this block device
 	osp_spinlock_t head_lock;	// lock for ticket_head;
 
-    	int readlock_num;
+    int readlock_num;
+
+    list_node_t *ticket_hole_head;
 
 	unsigned ticket_head;		// Currently running ticket for
 					// the device lock
@@ -244,7 +252,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// Your code here (instead of the next two lines).
 		//eprintk("Attempting to acquire\n");
 		r = -ENOTTY;
-	unsigned local_ticket;
+	    unsigned local_ticket;
 	
 
         if ( filp_writable )
@@ -264,14 +272,48 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			    local_ticket = d->ticket_head;
 			    d->ticket_head++;
 		        osp_spin_unlock(&d->head_lock);
-                //eprintk("waiting for write lock\n");
+                eprintk("waiting for write lock ticket=%d\n", local_ticket);
 		        wait_event_interruptible( d->blockq, (d->mutex.lock == 0 &&
 						d->ticket_tail == local_ticket));
                 d->ticket_tail++;
+
                 //signal handling
                 if ( signal_pending(current) )
                 {
-                    //eprintk("Received signal\n");
+                    list_node_t *hole = kzalloc( sizeof(list_node_t), GFP_ATOMIC );
+                    hole->next = hole->prev = NULL;
+                    hole->ticket = local_ticket;
+                    //add the hole to the ticket whole list
+                    if ( d->ticket_hole_head == NULL )
+                    {
+                        d->ticket_hole_head = hole;
+                    }
+                    else
+                    {
+                        list_node_t* cur;
+                        for ( cur = d->ticket_hole_head; cur->next != NULL; cur = cur->next )
+                        {
+                            if (cur->next == NULL)
+                            {
+                                hole->prev = cur;
+                                cur->next = hole;
+                            }
+                            else if ( hole->ticket < cur->next->ticket &&
+                                hole->ticket >= d->ticket_tail)
+                            {
+                                //insert the node in the list
+                                hole->prev = cur;
+                                hole->next = cur->next;
+                                cur->next->prev = hole;
+                                cur->next = hole;
+                                break;
+                            }
+                            
+                        }
+                    }
+
+                        
+                    eprintk("Received signal to kill write\n");
                     return -ERESTARTSYS;
                 }
 		        osp_spin_lock(&d->mutex);
@@ -310,13 +352,51 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		        wait_event_interruptible( d->blockq, 
 			        ( d->mutex.lock == 0 || d->readlock_num != 0) &&
 					d->ticket_tail == local_ticket );
-                d->ticket_tail++;
+                
                 //signal processing
                 if ( signal_pending(current) )
                 {
-                    //eprintk("received signal\n");
+                    list_node_t *hole = kzalloc( sizeof(list_node_t), GFP_ATOMIC );
+                    hole->next = NULL;
+                    hole->prev = NULL;
+                    hole->ticket = local_ticket;
+                    //add the hole to the ticket whole list
+                    if ( d->ticket_hole_head == NULL )
+                    {
+                        d->ticket_hole_head = hole;
+                        eprintk( "adding ticket %d to the empty hole list\n", local_ticket ); 
+                    }
+                    else
+                    {
+                        list_node_t* cur;
+                        for ( cur = d->ticket_hole_head; cur->next != NULL; cur = cur->next )
+                        {
+                            if (cur->next == NULL)
+                            {
+                                hole->prev = cur;
+                                cur->next = hole;
+                                eprintk( "adding ticket %d to the hole list\n", local_ticket );
+                            }
+                            else if ( hole->ticket < cur->next->ticket &&
+                                hole->ticket >= d->ticket_tail)
+                            {
+                                //insert the node in the list
+                                hole->prev = cur;
+                                hole->next = cur->next;
+                                cur->next->prev = hole;
+                                cur->next = hole;
+                                eprintk("allocated hole node\n");
+                                break;
+                            }
+                        }
+                    }
+
+                    eprintk("received signal to kill read\n");
                     return -ERESTARTSYS;
                 }
+
+                d->ticket_tail++;
+
                 if ( d->mutex.lock == 0)
                 {
                     osp_spin_lock(&d->mutex);
@@ -404,6 +484,28 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             }
             d->readlock_num--;
             filp->f_flags ^= F_OSPRD_LOCKED;
+
+            //check to see if the ticket_tail has received a signal
+            if ( d->ticket_hole_head != NULL )
+            {
+                eprintk("looking for holes\n");
+                while ( d->ticket_tail == d->ticket_hole_head->ticket )
+                {
+                    d->ticket_tail++;
+                    //remove the hole and deallocate
+                    list_node_t* tmp = d->ticket_hole_head;
+                    d->ticket_hole_head = d->ticket_hole_head->next;
+                    kfree(tmp);
+
+                    eprintk("skipped ticket %d\n", d->ticket_hole_head->ticket);
+
+                    if ( d->ticket_hole_head == NULL )
+                    {
+                        break;
+                    }
+                }
+            }
+
             wake_up_all(&d->blockq);
             r = 0;
             //eprintk("decremented read locks\n");
@@ -413,7 +515,31 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             //unlock a write lock
             osp_spin_unlock( &d->mutex );
             filp->f_flags ^= F_OSPRD_LOCKED;
-            //eprintk("unlocked write lock and mutex.lock=%d and d->readlock_num=%d and d->ticket_tail=%d\n", d->mutex.lock, d->readlock_num, d->ticket_tail);
+            //eprintk("unlocked write lock and mutex.lock=%d and d->readlock_num=%d and d->ticket_tail=%d\n", d->mutex.lock, d->readlock_num, d->ticket_tail)
+            
+            //check to see if the ticket_tail has received a signal
+            if ( d->ticket_hole_head != NULL )
+            {
+                eprintk("looking for holes\n");
+                while ( d->ticket_tail == d->ticket_hole_head->ticket )
+                {
+                    d->ticket_tail++;
+                    //remove the hole and deallocate
+                    list_node_t* tmp = d->ticket_hole_head;
+                    eprintk("tmp is %d\n", tmp);
+                    d->ticket_hole_head = d->ticket_hole_head->next;
+                    eprintk("gonna free and tmp is %d\n", tmp);
+                    kfree(tmp);
+
+                    eprintk("skipped ticket %d\n", d->ticket_hole_head->ticket);
+
+                    if ( d->ticket_hole_head == NULL )
+                    {
+                        break;
+                    }
+                }
+            }
+;
             wake_up_all(&d->blockq);
             r = 0;
         }
@@ -433,6 +559,7 @@ static void osprd_setup(osprd_info_t *d)
 	osp_spin_lock_init(&d->mutex);
 	d->ticket_head = d->ticket_tail = 0;
     d->readlock_num = 0;
+    d->ticket_hole_head = NULL;
 	osp_spin_lock_init(&d->head_lock);
 	/* Add code here if you add fields to osprd_info_t. */
 }
