@@ -272,7 +272,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			    local_ticket = d->ticket_head;
 			    d->ticket_head++;
 		        osp_spin_unlock(&d->head_lock);
-                eprintk("waiting for write lock ticket=%d\n", local_ticket);
+                //eprintk("waiting for write lock ticket=%d\n", local_ticket);
 		        wait_event_interruptible( d->blockq, (d->mutex.lock == 0 &&
 						d->ticket_tail == local_ticket));
                 d->ticket_tail++;
@@ -313,7 +313,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                     }
 
                         
-                    eprintk("Received signal to kill write\n");
+                    //eprintk("Received signal to kill write\n");
                     return -ERESTARTSYS;
                 }
 		        osp_spin_lock(&d->mutex);
@@ -357,14 +357,13 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                 if ( signal_pending(current) )
                 {
                     list_node_t *hole = kzalloc( sizeof(list_node_t), GFP_ATOMIC );
-                    hole->next = NULL;
-                    hole->prev = NULL;
+                    hole->next = hole->prev = NULL;
                     hole->ticket = local_ticket;
                     //add the hole to the ticket whole list
                     if ( d->ticket_hole_head == NULL )
                     {
                         d->ticket_hole_head = hole;
-                        eprintk( "adding ticket %d to the empty hole list\n", local_ticket ); 
+                        //eprintk( "adding ticket %d to the hole list\n", local_ticket ); 
                     }
                     else
                     {
@@ -375,7 +374,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                             {
                                 hole->prev = cur;
                                 cur->next = hole;
-                                eprintk( "adding ticket %d to the hole list\n", local_ticket );
+                                //eprintk( "adding ticket %d to the hole list\n", local_ticket );
                             }
                             else if ( hole->ticket < cur->next->ticket &&
                                 hole->ticket >= d->ticket_tail)
@@ -385,13 +384,13 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
                                 hole->next = cur->next;
                                 cur->next->prev = hole;
                                 cur->next = hole;
-                                eprintk("allocated hole node\n");
+                                //eprintk("allocated hole node\n");
                                 break;
                             }
                         }
                     }
 
-                    eprintk("received signal to kill read\n");
+                    //eprintk("received signal to kill read\n");
                     return -ERESTARTSYS;
                 }
 
@@ -488,16 +487,16 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             //check to see if the ticket_tail has received a signal
             if ( d->ticket_hole_head != NULL )
             {
-                eprintk("looking for holes\n");
+                //eprintk("looking for holes\n");
                 while ( d->ticket_tail == d->ticket_hole_head->ticket )
                 {
                     d->ticket_tail++;
                     //remove the hole and deallocate
                     list_node_t* tmp = d->ticket_hole_head;
+                    //eprintk("skipped ticket %d\n", d->ticket_hole_head->ticket);
                     d->ticket_hole_head = d->ticket_hole_head->next;
                     kfree(tmp);
 
-                    eprintk("skipped ticket %d\n", d->ticket_hole_head->ticket);
 
                     if ( d->ticket_hole_head == NULL )
                     {
@@ -520,18 +519,16 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             //check to see if the ticket_tail has received a signal
             if ( d->ticket_hole_head != NULL )
             {
-                eprintk("looking for holes\n");
+                //eprintk("looking for holes\n");
                 while ( d->ticket_tail == d->ticket_hole_head->ticket )
                 {
                     d->ticket_tail++;
                     //remove the hole and deallocate
                     list_node_t* tmp = d->ticket_hole_head;
-                    eprintk("tmp is %d\n", tmp);
+                    //eprintk("skipped ticket %d\n", d->ticket_hole_head->ticket);
                     d->ticket_hole_head = d->ticket_hole_head->next;
-                    eprintk("gonna free and tmp is %d\n", tmp);
                     kfree(tmp);
 
-                    eprintk("skipped ticket %d\n", d->ticket_hole_head->ticket);
 
                     if ( d->ticket_hole_head == NULL )
                     {
